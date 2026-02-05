@@ -1,14 +1,24 @@
 import os
 import asyncio
+import random
 from pathlib import Path
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ParseMode, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.contrib.fsm_storage.files import JSONStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from loguru import logger
+from collections import defaultdict
+
+# Store group members for lottery feature
+group_members = defaultdict(set)  # {group_id: {(user_id, name), ...}}
+
+# Active lobby participants and message tracking for /random_1
+participants_lobby = defaultdict(dict)  # {chat_id: {user_id: name, ...}}
+lobby_message_id = {}  # {chat_id: message_id}
+lobby_open = set()  # set of chat_ids with open lobby
 
 # Define states for conversation
 class Form(StatesGroup):
@@ -16,6 +26,7 @@ class Form(StatesGroup):
     waiting_for_phone = State()
     waiting_for_email = State()
     waiting_for_domain = State()
+    waiting_for_member_names = State()
 
 # Load environment variables from .env file first
 env_path = Path(__file__).resolve().parent.parent.parent / '.env'
@@ -41,13 +52,14 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 async def send_welcome(message: types.Message):
     """Send welcome message and help."""
     welcome_text = (
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        "🔍 Я бот для OSINT-разведки. Вот что я умею:\n\n"
+        f" Привет, {message.from_user.first_name}!\n\n"
+        " Я бот для OSINT-разведки. Вот что я умею:\n\n"
         "• /osint_username [ник] - Поиск по никнейму\n"
         "• /osint_phone [телефон] - Поиск по номеру телефона\n"
         "• /osint_email [email] - Поиск по email\n"
         "• /osint_domain [домен] - Анализ домена или IP\n"
         "\nИспользуйте /help для справки."
+        "\n\nДля работы в группах используйте /random_1."
     )
     await message.reply(welcome_text)
 
@@ -55,7 +67,7 @@ async def send_welcome(message: types.Message):
 async def help_command(message: types.Message):
     """Send help message."""
     help_text = (
-        "🔍 *Доступные команды:*\n\n"
+        "*Доступные команды:*\n\n"
         "*Основные команды:*\n"
         "/start - Начать работу с ботом\n"
         "/help - Показать это сообщение\n\n"
@@ -64,6 +76,8 @@ async def help_command(message: types.Message):
         "/osint_phone [телефон] - Анализ номера телефона\n"
         "/osint_email [email] - Анализ email\n"
         "/osint_domain [домен] - Анализ домена или IP\n\n"
+        "*Групповые команды:*\n"
+        "/random_1 - Распределить случайные числа (0-50) участникам группы\n\n"
         "*Примеры:*\n"
         "/osint_username johndoe\n"
         "/osint_phone +79123456789\n"
@@ -284,6 +298,165 @@ async def process_domain(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
+@dp.message_handler(commands=['random_1'])
+async def cmd_random_lottery(message: types.Message):
+    """Open a lobby for users to join via button."""
+
+    if message.chat.type not in ['group', 'supergroup']:
+        await message.reply("❌ Эта команда работает только в групповых чатах.")
+        return
+
+    chat_id = message.chat.id
+    if chat_id in lobby_open:
+        await message.reply('❗ Набор уже открыт. Нажмите кнопку "Участвовать" или закройте набор командой /stop_in.')
+        return
+
+    # Open lobby
+    lobby_open.add(chat_id)
+    participants_lobby[chat_id] = {}
+
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton(text='Участвовать', callback_data=f'lottery_join:{chat_id}')
+    )
+
+    sent = await message.reply("Это набор участников для раздачи номеров Random. Нажмите кнопку, чтобы записаться. Команда /stop_in закроет набор.", reply_markup=keyboard)
+    lobby_message_id[chat_id] = sent.message_id
+
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('lottery_join:'))
+async def callback_lottery_join(callback_query: types.CallbackQuery):
+    """Handle user joining the lottery via inline button."""
+    try:
+        data = callback_query.data
+        _, chat_id_str = data.split(':', 1)
+        chat_id = int(chat_id_str)
+        user = callback_query.from_user
+        name = user.first_name or user.username or 'Unknown'
+
+        # Add to lobby participants
+        participants_lobby[chat_id][user.id] = name
+        # Also remember in historical members
+        group_members[chat_id].add((user.id, name))
+
+        await callback_query.answer('✅ Вы записаны на участие', show_alert=False)
+
+        # Optionally edit lobby message to show count
+        if chat_id in lobby_message_id:
+            try:
+                msg_id = lobby_message_id[chat_id]
+                count = len(participants_lobby[chat_id])
+                await bot.edit_message_text(
+                    f"Набор на участие открыт! Нажмите кнопку, чтобы записаться. (Записано: {count})\nКоманда /stop_in закроет набор.",
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    reply_markup=InlineKeyboardMarkup().add(
+                        InlineKeyboardButton(text='Участвовать', callback_data=f'lottery_join:{chat_id}')
+                    )
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Error in callback_lottery_join: {e}")
+
+
+@dp.message_handler(commands=['stop_in'])
+async def cmd_stop_lottery(message: types.Message):
+    """Close lobby and distribute numbers to participants."""
+    chat_id = message.chat.id
+    if chat_id not in lobby_open:
+        await message.reply('❗ Набор не открыт.')
+        return
+
+    # Only admins or creator can stop the lobby
+    try:
+        member = await bot.get_chat_member(chat_id, message.from_user.id)
+        if member.status not in ['administrator', 'creator']:
+            await message.reply('❌ Только администратор может закрыть набор.')
+            return
+    except Exception as e:
+        logger.debug(f"Error checking admin status for stop_in: {e}")
+        await message.reply('❌ Не удалось проверить права. Попробуйте снова.')
+        return
+
+    # Close lobby
+    lobby_open.discard(chat_id)
+
+    # Remove inline keyboard
+    if chat_id in lobby_message_id:
+        try:
+            await bot.edit_message_reply_markup(chat_id, lobby_message_id[chat_id], reply_markup=None)
+        except Exception:
+            pass
+
+    participants = list(participants_lobby.get(chat_id, {}).items())  # [(user_id, name), ...]
+    if not participants:
+        await message.reply('ℹ️ Никто не записался на участие.')
+        participants_lobby.pop(chat_id, None)
+        lobby_message_id.pop(chat_id, None)
+        return
+
+    # Shuffle participants
+    random.shuffle(participants)
+
+    distribution = []
+    if len(participants) <= 50:
+        numbers = list(range(1, 51))
+        random.shuffle(numbers)
+        for i, (user_id, name) in enumerate(participants):
+            distribution.append((name, numbers[i]))
+    else:
+        numbers = list(range(1, 51))
+        random.shuffle(numbers)
+        # first 50
+        for i in range(50):
+            user_id, name = participants[i]
+            distribution.append((name, numbers[i]))
+        # rest 1-10 random
+        for user_id, name in participants[50:]:
+            distribution.append((name, random.randint(1, 10)))
+
+    # Build and send result
+    result_message = '🎲 *РЕЗУЛЬТАТЫ РАСПРЕДЕЛЕНИЯ ЧИСЕЛ:*\n\n'
+    for i, (name, number) in enumerate(distribution, 1):
+        result_message += f"{i}. {name}: *{number}*\n"
+
+    result_message += f"\n📊 *Всего участников: {len(distribution)}*"
+    if len(participants) > 50:
+        result_message += f"\n\n⚠️ В группе {len(participants)} записавшихся. Первые 50 получили числа 1-50. Остальные получили числа 1-10."
+
+    await message.reply(result_message, parse_mode='markdown')
+
+    # cleanup
+    participants_lobby.pop(chat_id, None)
+    lobby_message_id.pop(chat_id, None)
+
+@dp.message_handler(content_types=types.ContentType.ANY)
+async def track_group_members(message: types.Message):
+    """Track users who interact in the group.
+
+    - Add `from_user` for any message type (text, photo, sticker, etc.).
+    - Also register `new_chat_members` service messages.
+    """
+    if message.chat.type not in ['group', 'supergroup']:
+        return
+
+    # Register users who send messages (covers text, photos, stickers, etc.)
+    user = message.from_user
+    if user:
+        name = (user.first_name or '') + (f" {user.last_name}" if user.last_name else '')
+        name = name.strip() or user.username or 'Unknown'
+        group_members[message.chat.id].add((user.id, name))
+
+    # If there are new chat members (service message), register them too
+    if hasattr(message, 'new_chat_members') and message.new_chat_members:
+        for new_user in message.new_chat_members:
+            name = (new_user.first_name or '') + (f" {new_user.last_name}" if new_user.last_name else '')
+            name = name.strip() or new_user.username or 'Unknown'
+            group_members[message.chat.id].add((new_user.id, name))
+
+    # Don't consume message, let other handlers process it
+    return
+
 async def start_bot():
     """Start the bot."""
     try:
@@ -294,4 +467,4 @@ async def start_bot():
         logger.critical(f"Fatal error: {e}", exc_info=True)
     finally:
         await bot.close()
-        logger.info("👋 OSINT Bot has been stopped")
+        logger.info("OSINT Bot has been stopped")

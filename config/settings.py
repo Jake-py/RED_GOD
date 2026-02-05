@@ -1,11 +1,19 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 class Settings(BaseSettings):
     # Bot settings
     BOT_TOKEN: str = "8598762736:AAEXphGzDnhM4fyM3IJzW0mgJLKuPTVvUlc"
-    ADMIN_IDS: list[int] = [5758764995]
+    ADMIN_IDS: Union[list[int], int] = [5758764995]
+    
+    @field_validator("ADMIN_IDS", mode="before")
+    @classmethod
+    def validate_admin_ids(cls, v):
+        if isinstance(v, int):
+            return [v]
+        return v
     
     # Rate limiting
     RATE_LIMIT: int = 30  # requests per minute
