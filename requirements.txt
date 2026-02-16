@@ -1,4 +1,4 @@
-aiogram==3.4
+aiogram==3.7
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 requests==2.31.0
@@ -6,7 +6,7 @@ beautifulsoup4==4.12.2
 python-whois==0.9.3
 shodan==1.31.0
 python-nmap==0.7.1
-pydantic>=2.4.1,<2.6
+pydantic>=2.4.1
 pydantic-settings==2.0.3
 loguru==0.7.2
 aiocache==0.12.1
