@@ -2,7 +2,7 @@
 
 ## Требования
 - Python 3.10+
-- pip (или pip3)
+- pip (or pip3)
 
 ---
 
@@ -64,7 +64,13 @@ python3 -m venv venv
 # Активировать
 source venv/bin/activate
 
-# Установить зависимости
+# Обновить pip
+pip install --upgrade pip
+
+# Установить зависимости (сначала попробовать с --prefer-binary для деплоя)
+pip install --prefer-binary -r requirements.txt
+
+# Или если не работает:
 pip install -r requirements.txt
 
 # Запустить бота
@@ -131,6 +137,12 @@ python main.py
 ```bash
 # Linux/macOS
 sudo python3 -m pip install -r requirements.txt
+```
+
+### Если ошибка "Read-only file system" при установке (деплой на Render и подобные):
+```bash
+# Используйте флаг --prefer-binary для установки готовых wheels
+pip install --prefer-binary -r requirements.txt
 ```
 
 ---
