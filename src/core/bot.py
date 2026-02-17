@@ -171,8 +171,9 @@ async def help_command(message: types.Message):
 @dp.message(Command(commands=['osint_username']))
 async def cmd_osint_username(message: types.Message, state: FSMContext):
     """Handle username search command - step 1: select platform"""
+    await state.finish()  # Сбросить любое предыдущее состояние
     await Form.waiting_for_username_platform.set()
-    
+
     platform_text = (
         "🔍 *Поиск по никнейму*\n\n"
         "Выберите платформу для поиска:\n\n"
@@ -344,6 +345,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
 @dp.message(Command(commands=['osint_phone']))
 async def cmd_osint_phone(message: types.Message, state: FSMContext):
     """Handle phone search command"""
+    await state.finish()  # Сбросить любое предыдущее состояние
     await Form.waiting_for_phone.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("📱 Введите номер телефона (можно с + и -):", reply_markup=cancel_btn)
@@ -352,9 +354,12 @@ async def cmd_osint_phone(message: types.Message, state: FSMContext):
 @dp.message(State(Form.waiting_for_phone))
 async def process_phone(message: types.Message, state: FSMContext):
     """Process phone input and show results"""
-    if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
+    if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
         await state.finish()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
+        return
+    
+    if not message.text:
         return
     
     phone = message.text.strip()
@@ -370,18 +375,6 @@ async def process_phone(message: types.Message, state: FSMContext):
         # Search for phone
         result = await search_phone(phone)
         
-        # Extract and send images if found
-        images = extract_images_from_result(result)
-        if images:
-            try:
-                if len(images) == 1:
-                    await bot.send_photo(message.chat.id, images[0])
-                else:
-                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]
-                    await bot.send_media_group(message.chat.id, media_group)
-            except Exception as e:
-                logger.debug(f"Could not send images: {e}")
-        
         # Format and send results
         response = format_result(result)
         await message.reply(response, disable_web_page_preview=True)
@@ -396,6 +389,7 @@ async def process_phone(message: types.Message, state: FSMContext):
 @dp.message(Command(commands=['osint_email']))
 async def cmd_osint_email(message: types.Message, state: FSMContext):
     """Handle email search command"""
+    await state.finish()
     await Form.waiting_for_email.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("📧 Введите email адрес:", reply_markup=cancel_btn)
@@ -404,9 +398,12 @@ async def cmd_osint_email(message: types.Message, state: FSMContext):
 @dp.message(State(Form.waiting_for_email))
 async def process_email(message: types.Message, state: FSMContext):
     """Process email input and show results"""
-    if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
+    if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
         await state.finish()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
+        return
+    
+    if not message.text:
         return
     
     email = message.text.strip()
@@ -422,18 +419,6 @@ async def process_email(message: types.Message, state: FSMContext):
         # Search for email
         result = await search_email(email)
         
-        # Extract and send images if found
-        images = extract_images_from_result(result)
-        if images:
-            try:
-                if len(images) == 1:
-                    await bot.send_photo(message.chat.id, images[0])
-                else:
-                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]
-                    await bot.send_media_group(message.chat.id, media_group)
-            except Exception as e:
-                logger.debug(f"Could not send images: {e}")
-        
         # Format and send results
         response = format_result(result)
         await message.reply(response, disable_web_page_preview=True)
@@ -448,6 +433,7 @@ async def process_email(message: types.Message, state: FSMContext):
 @dp.message(Command(commands=['osint_domain']))
 async def cmd_osint_domain(message: types.Message, state: FSMContext):
     """Handle domain analysis command"""
+    await state.finish()
     await Form.waiting_for_domain.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("🌍 Введите домен или IP адрес:", reply_markup=cancel_btn)
@@ -456,9 +442,12 @@ async def cmd_osint_domain(message: types.Message, state: FSMContext):
 @dp.message(State(Form.waiting_for_domain))
 async def process_domain(message: types.Message, state: FSMContext):
     """Process domain input and show results"""
-    if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
+    if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
         await state.finish()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
+        return
+    
+    if not message.text:
         return
     
     domain = message.text.strip()
@@ -483,6 +472,13 @@ async def process_domain(message: types.Message, state: FSMContext):
         await message.reply("❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
     finally:
         await state.finish()
+
+# Debug handler - отвечает на любое текстовое сообщение
+@dp.message()
+async def debug_handler(message: types.Message):
+    """Debug handler - отвечает на любое сообщение"""
+    logger.info(f"Received message: {message.text} from {message.from_user.id}")
+    await message.reply(f"✅ Бот работает! Получено: {message.text}\n\nИспользуйте /help для списка команд.")
 
 async def start_bot():
     """Start the bot."""
