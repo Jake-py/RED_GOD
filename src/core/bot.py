@@ -463,7 +463,7 @@ async def start_bot():
     """Start the bot."""
     try:
         logger.info("🚀 Starting OSINT Bot...")
-        await dp.start_polling()
+        await dp.start_polling(bot)
     except Exception as e:
         logger.critical(f"Fatal error: {e}", exc_info=True)
     finally:
