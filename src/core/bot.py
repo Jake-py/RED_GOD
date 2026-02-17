@@ -45,7 +45,8 @@ print("Debug - BOT_TOKEN in settings:", getattr(settings, 'BOT_TOKEN', 'NOT FOUN
 
 # Initialize bot and dispatcher without HTML parse mode
 bot = Bot(token=settings.BOT_TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
