@@ -4,7 +4,25 @@ Formatter Module.
 This module provides functions to format OSINT results for display.
 """
 from typing import Dict, List, Any, Optional
-from aiogram.utils.markdown import escape_md, quote_html
+
+
+def escape_markdown(text: str) -> str:
+    """Escape special Markdown characters."""
+    # Simple markdown escaping
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, '\\' + char)
+    return text
+
+
+def escape_html(text: str) -> str:
+    """Escape HTML special characters."""
+    return (text
+            .replace('&', '&amp;')
+            .replace('<', '<')
+            .replace('>', '>')
+            .replace('"', '"')
+            .replace("'", '&#39;'))
 
 
 def extract_images_from_result(result: Dict[str, Any]) -> List[str]:
@@ -281,12 +299,3 @@ def format_generic_result(result: Dict[str, Any]) -> str:
     
     return "\n".join(lines)
 
-
-def escape_markdown(text: str) -> str:
-    """Escape special Markdown characters."""
-    return escape_md(text)
-
-
-def escape_html(text: str) -> str:
-    """Escape HTML special characters."""
-    return quote_html(text)
