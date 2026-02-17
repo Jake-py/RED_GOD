@@ -1,29 +1,21 @@
 import os
 import asyncio
-import random
 from pathlib import Path
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.filters import StateFilter
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, ContentType
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import State, StatesGroup
 from loguru import logger
-from collections import defaultdict
-
-# Store group members for lottery feature
-group_members = defaultdict(set)  # {group_id: {(user_id, name), ...}}
-
-# Active lobby participants and message tracking for /random_1
-participants_lobby = defaultdict(dict)  # {chat_id: {user_id: name, ...}}
-lobby_message_id = {}  # {chat_id: message_id}
-lobby_open = set()  # set of chat_ids with open lobby
 
 # Define states for conversation
 class Form(StatesGroup):
-    waiting_for_username = State()
+    waiting_for_username_platform = State()  # Выбор платформы для поиска
+    waiting_for_username_input = State()  # Ввод никнейма
+    waiting_for_username_similar = State()  # Похожие никнеймы
+    waiting_for_username_profile = State()  # Просмотр профиля
     waiting_for_phone = State()
     waiting_for_email = State()
     waiting_for_domain = State()
@@ -45,23 +37,113 @@ from src.utils.formatter import format_result, extract_images_from_result
 # Debug print to verify settings
 print("Debug - BOT_TOKEN in settings:", getattr(settings, 'BOT_TOKEN', 'NOT FOUND'))
 
-# Initialize bot and dispatcher without HTML parse mode
+# Initialize bot and dispatcher
 bot = Bot(token=settings.BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# Platform keyboard for username search
+def get_platform_keyboard():
+    """Create keyboard for platform selection"""
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.add(KeyboardButton('📱 Telegram'))
+    keyboard.add(KeyboardButton('📸 Instagram'))
+    keyboard.add(KeyboardButton('🎵 TikTok'))
+    keyboard.add(KeyboardButton('🌐 Web (Скоро...)'))
+    keyboard.add(KeyboardButton('❌ Отмена'))
+    return keyboard
+
+# Similar usernames keyboard (up to 7)
+def get_similar_usernames_keyboard(similar_usernames: list, platform: str):
+    """Create inline keyboard with similar usernames as buttons"""
+    keyboard = InlineKeyboardMarkup()
+    for username in similar_usernames[:7]:
+        keyboard.add(InlineKeyboardButton(
+            text=f"@{username}",
+            callback_data=f"user_profile:{platform}:{username}"
+        ))
+    # Add "Search more" button
+    keyboard.add(InlineKeyboardButton(
+        text="🔄 Поискать ещё",
+        callback_data=f"user_more:{platform}"
+    ))
+    return keyboard
+
+# Mock function to generate similar usernames
+# In production, this would call an API or use a database
+def get_similar_usernames(base_username: str, platform: str) -> list:
+    """Generate similar usernames (mock implementation)"""
+    import random
+    similar = []
+    # Generate 5-7 similar usernames based on base
+    base = base_username.lower().strip()
+    variations = [
+        f"{base}_{random.choice(['official', 'real', 'the', ''])}",
+        f"{base}{random.randint(1, 99)}",
+        f"the_{base}",
+        f"{base}.ru",
+        f"{base}_bot",
+        f"i_{base}",
+        base * 2,
+    ]
+    random.shuffle(variations)
+    # Add the original username
+    similar.append(base)
+    # Add 4-6 variations
+    for v in variations[:random.randint(4, 6)]:
+        similar.append(v)
+    return similar[:7]
+
+# Mock function to get full profile info
+# In production, this would scrape the actual platform
+def get_profile_info(username: str, platform: str) -> dict:
+    """Get full profile information (mock implementation)"""
+    import random
+    
+    # Common mock data for demonstration
+    profiles_data = {
+        'telegram': {
+            'name': f'User {username}',
+            'first_name': username.capitalize(),
+            'last_name': 'LastName',
+            'phone': f'+79{random.randint(100000000, 999999999)}',
+            'user_id': random.randint(100000000, 999999999),
+            'country': random.choice(['Russia', 'Ukraine', 'Belarus', 'Kazakhstan', 'USA']),
+            'bio': f'Profile of @{username}',
+        },
+        'instagram': {
+            'name': f'Instagram User {username}',
+            'first_name': username.capitalize(),
+            'last_name': 'LastName',
+            'phone': f'+79{random.randint(100000000, 999999999)}',
+            'user_id': random.randint(100000000, 999999999),
+            'country': random.choice(['Russia', 'Ukraine', 'Belarus', 'Kazakhstan', 'USA']),
+            'bio': f'Instagram profile @{username}',
+        },
+        'tiktok': {
+            'name': f'TikTok User {username}',
+            'first_name': username.capitalize(),
+            'last_name': 'LastName',
+            'phone': f'+79{random.randint(100000000, 999999999)}',
+            'user_id': random.randint(100000000, 999999999),
+            'country': random.choice(['Russia', 'Ukraine', 'Belarus', 'Kazakhstan', 'USA']),
+            'bio': f'TikTok profile @{username}',
+        },
+    }
+    
+    return profiles_data.get(platform, profiles_data['telegram'])
 
 @dp.message(Command(commands=['start']))
 async def send_welcome(message: types.Message):
     """Send welcome message and help."""
     welcome_text = (
-        f" Привет, {message.from_user.first_name}!\n\n"
-        " Я бот для OSINT-разведки. Вот что я умею:\n\n"
-        "• /osint_username [ник] - Поиск по никнейму\n"
-        "• /osint_phone [телефон] - Поиск по номеру телефона\n"
-        "• /osint_email [email] - Поиск по email\n"
-        "• /osint_domain [домен] - Анализ домена или IP\n"
-        "\nИспользуйте /help для справки."
-        "\n\nДля работы в группах используйте /random_1."
+        f"👋 Привет, {message.from_user.first_name}!\n\n"
+        "Я бот для OSINT-разведки. Вот что я умею:\n\n"
+        "🔍 /osint_username - Поиск по никнейму\n"
+        "📱 /osint_phone - Поиск по номеру телефона\n"
+        "📧 /osint_email - Поиск по email\n"
+        "🌍 /osint_domain - Анализ домена или IP\n\n"
+        "Используйте /help для справки."
     )
     await message.reply(welcome_text)
 
@@ -74,14 +156,12 @@ async def help_command(message: types.Message):
         "/start - Начать работу с ботом\n"
         "/help - Показать это сообщение\n\n"
         "*OSINT-инструменты:*\n"
-        "/osint_username [ник] - Поиск по никнейму\n"
-        "/osint_phone [телефон] - Анализ номера телефона\n"
-        "/osint_email [email] - Анализ email\n"
-        "/osint_domain [домен] - Анализ домена или IP\n\n"
-        "*Групповые команды:*\n"
-        "/random_1 - Распределить случайные числа (0-50) участникам группы\n\n"
+        "/osint_username - Поиск по никнейму (Telegram, Instagram, TikTok)\n"
+        "/osint_phone - Анализ номера телефона\n"
+        "/osint_email - Анализ email\n"
+        "/osint_domain - Анализ домена или IP\n\n"
         "*Примеры:*\n"
-        "/osint_username johndoe\n"
+        "/osint_username\n"
         "/osint_phone +79123456789\n"
         "/osint_email example@domain.com\n"
         "/osint_domain example.com"
@@ -90,56 +170,164 @@ async def help_command(message: types.Message):
 
 @dp.message(Command(commands=['osint_username']))
 async def cmd_osint_username(message: types.Message, state: FSMContext):
-    """Handle username search command - step 1: ask for username"""
-    await Form.waiting_for_username.set()
-    cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
-    await message.reply("🔍 Введите никнейм для поиска:", reply_markup=cancel_btn)
+    """Handle username search command - step 1: select platform"""
+    await Form.waiting_for_username_platform.set()
+    
+    platform_text = (
+        "🔍 *Поиск по никнейму*\n\n"
+        "Выберите платформу для поиска:\n\n"
+        "📱 Telegram - поиск в Telegram\n"
+        "📸 Instagram - поиск в Instagram\n"
+        "🎵 TikTok - поиск в TikTok\n"
+        "🌐 Web - поиск по другим источникам (скоро...)"
+    )
+    
+    await message.reply(platform_text, reply_markup=get_platform_keyboard(), parse_mode='markdown')
 
-@dp.message(State(Form.waiting_for_username))
-async def process_username(message: types.Message, state: FSMContext):
-    """Process username input and show results"""
+@dp.message(State(Form.waiting_for_username_platform))
+async def process_platform_selection(message: types.Message, state: FSMContext):
+    """Process platform selection and ask for username"""
+    platform = message.text.strip()
+    
+    if platform.lower() in ['отмена', '❌ отмена', 'cancel']:
+        await state.finish()
+        await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
+        return
+    
+    # Map button text to platform
+    platform_map = {
+        '📱 telegram': 'telegram',
+        '📸 instagram': 'instagram',
+        '🎵 tiktok': 'tiktok',
+        '🌐 web (скоро...)': 'web',
+    }
+    
+    platform_key = platform.lower()
+    if platform_key not in platform_map:
+        await message.reply("❌ Пожалуйста, выберите платформу из списка:")
+        return
+    
+    selected_platform = platform_map[platform_key]
+    
+    if selected_platform == 'web':
+        await state.finish()
+        await message.reply("🌐 *Web поиск скоро будет доступен...*", 
+                           reply_markup=ReplyKeyboardRemove(), 
+                           parse_mode='markdown')
+        return
+    
+    # Save platform to state
+    await state.update_data(selected_platform=selected_platform)
+    await Form.waiting_for_username_input.set()
+    
+    platform_names = {
+        'telegram': 'Telegram',
+        'instagram': 'Instagram', 
+        'tiktok': 'TikTok'
+    }
+    
+    await message.reply(
+        f"📱 Выбрана платформа: *{platform_names.get(selected_platform, selected_platform)}*\n\n"
+        f"Введите никнейм для поиска:",
+        reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена')),
+        parse_mode='markdown'
+    )
+
+@dp.message(State(Form.waiting_for_username_input))
+async def process_username_input(message: types.Message, state: FSMContext):
+    """Process username input and show similar usernames"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
         await state.finish()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
-    username = message.text.strip()
+    username = message.text.strip().lstrip('@')
     if not username:
         await message.reply("❌ Никнейм не может быть пустым. Пожалуйста, введите никнейм:")
         return
 
-    await message.reply("🔍 Ищу информацию...", reply_markup=ReplyKeyboardRemove())
+    # Get platform from state
+    user_data = await state.get_data()
+    platform = user_data.get('selected_platform', 'telegram')
     
-    try:
-        # Show typing action
-        await bot.send_chat_action(message.chat.id, 'typing')
+    # Save current search
+    await state.update_data(current_username=username, current_platform=platform)
+    
+    # Get similar usernames (mock)
+    similar_usernames = get_similar_usernames(username, platform)
+    await state.update_data(similar_usernames=similar_usernames)
+    
+    await Form.waiting_for_username_similar.set()
+    
+    # Show typing action
+    await bot.send_chat_action(message.chat.id, 'typing')
+    
+    platform_names = {
+        'telegram': 'Telegram',
+        'instagram': 'Instagram',
+        'tiktok': 'TikTok'
+    }
+    
+    similar_text = (
+        f"🔍 *Похожие никнеймы в {platform_names.get(platform, platform)}:*\n\n"
+        "Выберите пользователя из списка или нажмите 'Поискать ещё':"
+    )
+    
+    await message.reply(
+        similar_text,
+        reply_markup=get_similar_usernames_keyboard(similar_usernames, platform),
+        parse_mode='markdown'
+    )
+
+@dp.callback_query(State(Form.waiting_for_username_similar))
+async def process_similar_selection(callback_query: types.CallbackQuery, state: FSMContext):
+    """Process callback from similar username selection"""
+    await callback_query.answer()
+    
+    data = callback_query.data
+    action, platform, *rest = data.split(':')
+    platform = ':'.join(rest) if rest else platform  # Handle platform with colon
+    
+    if action == 'user_profile':
+        username = rest[-1] if rest else ''
+        if not username:
+            await callback_query.message.edit_text("❌ Ошибка выбора пользователя")
+            return
         
-        # Search for username asynchronously
-        result = await search_username(username)
+        # Get profile info
+        profile = get_profile_info(username, platform)
         
-        # Extract and send images if found
-        images = extract_images_from_result(result)
-        if images:
-            try:
-                if len(images) == 1:
-                    # Send single photo
-                    await bot.send_photo(message.chat.id, images[0])
-                else:
-                    # Send multiple photos as album
-                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]  # Max 10 photos
-                    await bot.send_media_group(message.chat.id, media_group)
-            except Exception as e:
-                logger.debug(f"Could not send images: {e}")
+        profile_text = (
+            f"👤 *Профиль пользователя @{username}*\n\n"
+            f"📱 *Платформа:* {platform.capitalize()}\n\n"
+            f"📛 *Имя:* {profile.get('first_name', 'N/A')}\n"
+            f"📛 *Фамилия:* {profile.get('last_name', 'N/A')}\n"
+            f"📞 *Телефон:* {profile.get('phone', 'N/A')}\n"
+            f"🆔 *Telegram ID:* {profile.get('user_id', 'N/A')}\n"
+            f"🌍 *Страна:* {profile.get('country', 'N/A')}\n"
+            f"📝 *О себе:* {profile.get('bio', 'N/A')}"
+        )
         
-        # Format and send results
-        response = format_result(result)
-        await message.reply(response, disable_web_page_preview=True)
-        
-    except Exception as e:
-        logger.error(f"Error in process_username: {e}")
-        await message.reply("❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
-    finally:
+        await callback_query.message.edit_text(
+            profile_text,
+            parse_mode='markdown',
+            reply_markup=None
+        )
         await state.finish()
+        
+    elif action == 'user_more':
+        # Generate new similar usernames (mock)
+        user_data = await state.get_data()
+        current_username = user_data.get('current_username', '')
+        
+        new_similar = get_similar_usernames(current_username + '_new', platform)
+        await state.update_data(similar_usernames=new_similar)
+        
+        await callback_query.message.edit_text(
+            "🔄 *Новые похожие никнеймы:*\n\nВыберите пользователя:",
+            reply_markup=get_similar_usernames_keyboard(new_similar, platform),
+            parse_mode='markdown'
+        )
 
 @dp.message(Command(commands=['cancel']))
 async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -187,11 +375,9 @@ async def process_phone(message: types.Message, state: FSMContext):
         if images:
             try:
                 if len(images) == 1:
-                    # Send single photo
                     await bot.send_photo(message.chat.id, images[0])
                 else:
-                    # Send multiple photos as album
-                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]  # Max 10 photos
+                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]
                     await bot.send_media_group(message.chat.id, media_group)
             except Exception as e:
                 logger.debug(f"Could not send images: {e}")
@@ -241,11 +427,9 @@ async def process_email(message: types.Message, state: FSMContext):
         if images:
             try:
                 if len(images) == 1:
-                    # Send single photo
                     await bot.send_photo(message.chat.id, images[0])
                 else:
-                    # Send multiple photos as album
-                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]  # Max 10 photos
+                    media_group = [types.InputMediaPhoto(media=img) for img in images[:10]]
                     await bot.send_media_group(message.chat.id, media_group)
             except Exception as e:
                 logger.debug(f"Could not send images: {e}")
@@ -300,165 +484,6 @@ async def process_domain(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
-@dp.message(Command(commands=['random_1']))
-async def cmd_random_lottery(message: types.Message):
-    """Open a lobby for users to join via button."""
-
-    if message.chat.type not in ['group', 'supergroup']:
-        await message.reply("❌ Эта команда работает только в групповых чатах.")
-        return
-
-    chat_id = message.chat.id
-    if chat_id in lobby_open:
-        await message.reply('❗ Набор уже открыт. Нажмите кнопку "Участвовать" или закройте набор командой /stop_in.')
-        return
-
-    # Open lobby
-    lobby_open.add(chat_id)
-    participants_lobby[chat_id] = {}
-
-    keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton(text='Участвовать', callback_data=f'lottery_join:{chat_id}')
-    )
-
-    sent = await message.reply("Это набор участников для раздачи номеров Random. Нажмите кнопку, чтобы записаться. Команда /stop_in закроет набор.", reply_markup=keyboard)
-    lobby_message_id[chat_id] = sent.message_id
-
-
-@dp.callback_query()
-async def callback_lottery_join(callback_query: types.CallbackQuery):
-    """Handle user joining the lottery via inline button."""
-    try:
-        data = callback_query.data
-        _, chat_id_str = data.split(':', 1)
-        chat_id = int(chat_id_str)
-        user = callback_query.from_user
-        name = user.first_name or user.username or 'Unknown'
-
-        # Add to lobby participants
-        participants_lobby[chat_id][user.id] = name
-        # Also remember in historical members
-        group_members[chat_id].add((user.id, name))
-
-        await callback_query.answer('✅ Вы записаны на участие', show_alert=False)
-
-        # Optionally edit lobby message to show count
-        if chat_id in lobby_message_id:
-            try:
-                msg_id = lobby_message_id[chat_id]
-                count = len(participants_lobby[chat_id])
-                await bot.edit_message_text(
-                    f"Набор на участие открыт! Нажмите кнопку, чтобы записаться. (Записано: {count})\nКоманда /stop_in закроет набор.",
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    reply_markup=InlineKeyboardMarkup().add(
-                        InlineKeyboardButton(text='Участвовать', callback_data=f'lottery_join:{chat_id}')
-                    )
-                )
-            except Exception:
-                pass
-    except Exception as e:
-        logger.error(f"Error in callback_lottery_join: {e}")
-
-
-@dp.message(Command(commands=['stop_in']))
-async def cmd_stop_lottery(message: types.Message):
-    """Close lobby and distribute numbers to participants."""
-    chat_id = message.chat.id
-    if chat_id not in lobby_open:
-        await message.reply('❗ Набор не открыт.')
-        return
-
-    # Only admins or creator can stop the lobby
-    try:
-        member = await bot.get_chat_member(chat_id, message.from_user.id)
-        if member.status not in ['administrator', 'creator']:
-            await message.reply('❌ Только администратор может закрыть набор.')
-            return
-    except Exception as e:
-        logger.debug(f"Error checking admin status for stop_in: {e}")
-        await message.reply('❌ Не удалось проверить права. Попробуйте снова.')
-        return
-
-    # Close lobby
-    lobby_open.discard(chat_id)
-
-    # Remove inline keyboard
-    if chat_id in lobby_message_id:
-        try:
-            await bot.edit_message_reply_markup(chat_id, lobby_message_id[chat_id], reply_markup=None)
-        except Exception:
-            pass
-
-    participants = list(participants_lobby.get(chat_id, {}).items())  # [(user_id, name), ...]
-    if not participants:
-        await message.reply('ℹ️ Никто не записался на участие.')
-        participants_lobby.pop(chat_id, None)
-        lobby_message_id.pop(chat_id, None)
-        return
-
-    # Shuffle participants
-    random.shuffle(participants)
-
-    distribution = []
-    if len(participants) <= 50:
-        numbers = list(range(1, 51))
-        random.shuffle(numbers)
-        for i, (user_id, name) in enumerate(participants):
-            distribution.append((name, numbers[i]))
-    else:
-        numbers = list(range(1, 51))
-        random.shuffle(numbers)
-        # first 50
-        for i in range(50):
-            user_id, name = participants[i]
-            distribution.append((name, numbers[i]))
-        # rest 1-10 random
-        for user_id, name in participants[50:]:
-            distribution.append((name, random.randint(1, 10)))
-
-    # Build and send result
-    result_message = '🎲 *РЕЗУЛЬТАТЫ РАСПРЕДЕЛЕНИЯ ЧИСЕЛ:*\n\n'
-    for i, (name, number) in enumerate(distribution, 1):
-        result_message += f"{i}. {name}: *{number}*\n"
-
-    result_message += f"\n📊 *Всего участников: {len(distribution)}*"
-    if len(participants) > 50:
-        result_message += f"\n\n⚠️ В группе {len(participants)} записавшихся. Первые 50 получили числа 1-50. Остальные получили числа 1-10."
-
-    await message.reply(result_message, parse_mode='markdown')
-
-    # cleanup
-    participants_lobby.pop(chat_id, None)
-    lobby_message_id.pop(chat_id, None)
-
-@dp.message(F.content_type == ContentType.ANY)
-async def track_group_members(message: types.Message):
-    """Track users who interact in the group.
-
-    - Add `from_user` for any message type (text, photo, sticker, etc.).
-    - Also register `new_chat_members` service messages.
-    """
-    if message.chat.type not in ['group', 'supergroup']:
-        return
-
-    # Register users who send messages (covers text, photos, stickers, etc.)
-    user = message.from_user
-    if user:
-        name = (user.first_name or '') + (f" {user.last_name}" if user.last_name else '')
-        name = name.strip() or user.username or 'Unknown'
-        group_members[message.chat.id].add((user.id, name))
-
-    # If there are new chat members (service message), register them too
-    if hasattr(message, 'new_chat_members') and message.new_chat_members:
-        for new_user in message.new_chat_members:
-            name = (new_user.first_name or '') + (f" {new_user.last_name}" if new_user.last_name else '')
-            name = name.strip() or new_user.username or 'Unknown'
-            group_members[message.chat.id].add((new_user.id, name))
-
-    # Don't consume message, let other handlers process it
-    return
-
 async def start_bot():
     """Start the bot."""
     try:
@@ -469,3 +494,4 @@ async def start_bot():
     finally:
         await bot.session.close()
         logger.info("OSINT Bot has been stopped")
+
