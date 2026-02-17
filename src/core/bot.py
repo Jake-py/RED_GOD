@@ -3,8 +3,8 @@ import asyncio
 import random
 from pathlib import Path
 from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, F
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command
 from aiogram.filters import StateFilter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, ContentType
 from aiogram.fsm.storage.memory import MemoryStorage
