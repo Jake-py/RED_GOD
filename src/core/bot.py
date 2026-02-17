@@ -4,7 +4,9 @@ import random
 from pathlib import Path
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CallbackData, F
+from aiogram.filters import StateFilter
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, ContentType
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.filters.state import State, StatesGroup
@@ -48,7 +50,7 @@ bot = Bot(token=settings.BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-@dp.message_handler(commands=['start'])
+@dp.message(Command(commands=['start']))
 async def send_welcome(message: types.Message):
     """Send welcome message and help."""
     welcome_text = (
@@ -63,7 +65,7 @@ async def send_welcome(message: types.Message):
     )
     await message.reply(welcome_text)
 
-@dp.message_handler(commands=['help'])
+@dp.message(Command(commands=['help']))
 async def help_command(message: types.Message):
     """Send help message."""
     help_text = (
@@ -86,14 +88,14 @@ async def help_command(message: types.Message):
     )
     await message.reply(help_text)
 
-@dp.message_handler(commands=['osint_username'])
+@dp.message(Command(commands=['osint_username']))
 async def cmd_osint_username(message: types.Message, state: FSMContext):
     """Handle username search command - step 1: ask for username"""
     await Form.waiting_for_username.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("🔍 Введите никнейм для поиска:", reply_markup=cancel_btn)
 
-@dp.message_handler(state=Form.waiting_for_username)
+@dp.message(State(Form.waiting_for_username))
 async def process_username(message: types.Message, state: FSMContext):
     """Process username input and show results"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
@@ -139,7 +141,7 @@ async def process_username(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
-@dp.message_handler(commands=['cancel'], state='*')
+@dp.message(Command(commands=['cancel']))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     """Allow user to cancel any action"""
     current_state = await state.get_state()
@@ -151,7 +153,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
     await message.reply("❌ Действие отменено.", reply_markup=ReplyKeyboardRemove())
 
 
-@dp.message_handler(commands=['osint_phone'])
+@dp.message(Command(commands=['osint_phone']))
 async def cmd_osint_phone(message: types.Message, state: FSMContext):
     """Handle phone search command"""
     await Form.waiting_for_phone.set()
@@ -159,7 +161,7 @@ async def cmd_osint_phone(message: types.Message, state: FSMContext):
     await message.reply("📱 Введите номер телефона (можно с + и -):", reply_markup=cancel_btn)
 
 
-@dp.message_handler(state=Form.waiting_for_phone)
+@dp.message(State(Form.waiting_for_phone))
 async def process_phone(message: types.Message, state: FSMContext):
     """Process phone input and show results"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
@@ -205,7 +207,7 @@ async def process_phone(message: types.Message, state: FSMContext):
         await state.finish()
 
 
-@dp.message_handler(commands=['osint_email'])
+@dp.message(Command(commands=['osint_email']))
 async def cmd_osint_email(message: types.Message, state: FSMContext):
     """Handle email search command"""
     await Form.waiting_for_email.set()
@@ -213,7 +215,7 @@ async def cmd_osint_email(message: types.Message, state: FSMContext):
     await message.reply("📧 Введите email адрес:", reply_markup=cancel_btn)
 
 
-@dp.message_handler(state=Form.waiting_for_email)
+@dp.message(State(Form.waiting_for_email))
 async def process_email(message: types.Message, state: FSMContext):
     """Process email input and show results"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
@@ -259,7 +261,7 @@ async def process_email(message: types.Message, state: FSMContext):
         await state.finish()
 
 
-@dp.message_handler(commands=['osint_domain'])
+@dp.message(Command(commands=['osint_domain']))
 async def cmd_osint_domain(message: types.Message, state: FSMContext):
     """Handle domain analysis command"""
     await Form.waiting_for_domain.set()
@@ -267,7 +269,7 @@ async def cmd_osint_domain(message: types.Message, state: FSMContext):
     await message.reply("🌍 Введите домен или IP адрес:", reply_markup=cancel_btn)
 
 
-@dp.message_handler(state=Form.waiting_for_domain)
+@dp.message(State(Form.waiting_for_domain))
 async def process_domain(message: types.Message, state: FSMContext):
     """Process domain input and show results"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
@@ -298,7 +300,7 @@ async def process_domain(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
-@dp.message_handler(commands=['random_1'])
+@dp.message(Command(commands=['random_1']))
 async def cmd_random_lottery(message: types.Message):
     """Open a lobby for users to join via button."""
 
@@ -323,7 +325,7 @@ async def cmd_random_lottery(message: types.Message):
     lobby_message_id[chat_id] = sent.message_id
 
 
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('lottery_join:'))
+@dp.callback_query()
 async def callback_lottery_join(callback_query: types.CallbackQuery):
     """Handle user joining the lottery via inline button."""
     try:
@@ -359,7 +361,7 @@ async def callback_lottery_join(callback_query: types.CallbackQuery):
         logger.error(f"Error in callback_lottery_join: {e}")
 
 
-@dp.message_handler(commands=['stop_in'])
+@dp.message(Command(commands=['stop_in']))
 async def cmd_stop_lottery(message: types.Message):
     """Close lobby and distribute numbers to participants."""
     chat_id = message.chat.id
@@ -430,7 +432,7 @@ async def cmd_stop_lottery(message: types.Message):
     participants_lobby.pop(chat_id, None)
     lobby_message_id.pop(chat_id, None)
 
-@dp.message_handler(content_types=types.ContentType.ANY)
+@dp.message(F.content_type == ContentType.ANY)
 async def track_group_members(message: types.Message):
     """Track users who interact in the group.
 
