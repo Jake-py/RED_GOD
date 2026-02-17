@@ -171,7 +171,7 @@ async def help_command(message: types.Message):
 @dp.message(Command(commands=['osint_username']))
 async def cmd_osint_username(message: types.Message, state: FSMContext):
     """Handle username search command - step 1: select platform"""
-    await state.finish()  # Сбросить любое предыдущее состояние
+    await state.clear()  # Сбросить любое предыдущее состояние
     await Form.waiting_for_username_platform.set()
 
     platform_text = (
@@ -191,7 +191,7 @@ async def process_platform_selection(message: types.Message, state: FSMContext):
     platform = message.text.strip()
     
     if platform.lower() in ['отмена', '❌ отмена', 'cancel']:
-        await state.finish()
+        await state.clear()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
@@ -211,7 +211,7 @@ async def process_platform_selection(message: types.Message, state: FSMContext):
     selected_platform = platform_map[platform_key]
     
     if selected_platform == 'web':
-        await state.finish()
+        await state.clear()
         await message.reply("🌐 *Web поиск скоро будет доступен...*", 
                            reply_markup=ReplyKeyboardRemove(), 
                            parse_mode='markdown')
@@ -238,7 +238,7 @@ async def process_platform_selection(message: types.Message, state: FSMContext):
 async def process_username_input(message: types.Message, state: FSMContext):
     """Process username input and show similar usernames"""
     if message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
-        await state.finish()
+        await state.clear()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
@@ -314,7 +314,7 @@ async def process_similar_selection(callback_query: types.CallbackQuery, state: 
             parse_mode='markdown',
             reply_markup=None
         )
-        await state.finish()
+        await state.clear()
         
     elif action == 'user_more':
         # Generate new similar usernames (mock)
@@ -338,14 +338,14 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         await message.reply("❌ Нет активных действий для отмены.")
         return
     
-    await state.finish()
+    await state.clear()
     await message.reply("❌ Действие отменено.", reply_markup=ReplyKeyboardRemove())
 
 
 @dp.message(Command(commands=['osint_phone']))
 async def cmd_osint_phone(message: types.Message, state: FSMContext):
     """Handle phone search command"""
-    await state.finish()  # Сбросить любое предыдущее состояние
+    await state.clear()  # Сбросить любое предыдущее состояние
     await Form.waiting_for_phone.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("📱 Введите номер телефона (можно с + и -):", reply_markup=cancel_btn)
@@ -355,7 +355,7 @@ async def cmd_osint_phone(message: types.Message, state: FSMContext):
 async def process_phone(message: types.Message, state: FSMContext):
     """Process phone input and show results"""
     if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
-        await state.finish()
+        await state.clear()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
@@ -383,13 +383,13 @@ async def process_phone(message: types.Message, state: FSMContext):
         logger.error(f"Error in process_phone: {e}")
         await message.reply("❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
     finally:
-        await state.finish()
+        await state.clear()
 
 
 @dp.message(Command(commands=['osint_email']))
 async def cmd_osint_email(message: types.Message, state: FSMContext):
     """Handle email search command"""
-    await state.finish()
+    await state.clear()
     await Form.waiting_for_email.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("📧 Введите email адрес:", reply_markup=cancel_btn)
@@ -399,7 +399,7 @@ async def cmd_osint_email(message: types.Message, state: FSMContext):
 async def process_email(message: types.Message, state: FSMContext):
     """Process email input and show results"""
     if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
-        await state.finish()
+        await state.clear()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
@@ -427,13 +427,13 @@ async def process_email(message: types.Message, state: FSMContext):
         logger.error(f"Error in process_email: {e}")
         await message.reply("❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
     finally:
-        await state.finish()
+        await state.clear()
 
 
 @dp.message(Command(commands=['osint_domain']))
 async def cmd_osint_domain(message: types.Message, state: FSMContext):
     """Handle domain analysis command"""
-    await state.finish()
+    await state.clear()
     await Form.waiting_for_domain.set()
     cancel_btn = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('❌ Отмена'))
     await message.reply("🌍 Введите домен или IP адрес:", reply_markup=cancel_btn)
@@ -443,7 +443,7 @@ async def cmd_osint_domain(message: types.Message, state: FSMContext):
 async def process_domain(message: types.Message, state: FSMContext):
     """Process domain input and show results"""
     if message.text and message.text.lower() in ['отмена', '❌ отмена', 'cancel']:
-        await state.finish()
+        await state.clear()
         await message.reply("❌ Отменено", reply_markup=ReplyKeyboardRemove())
         return
     
@@ -471,7 +471,7 @@ async def process_domain(message: types.Message, state: FSMContext):
         logger.error(f"Error in process_domain: {e}")
         await message.reply("❌ Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже.")
     finally:
-        await state.finish()
+        await state.clear()
 
 # Debug handler - отвечает на любое текстовое сообщение
 @dp.message()
